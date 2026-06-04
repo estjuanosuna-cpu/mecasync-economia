@@ -679,7 +679,7 @@ with st.sidebar:
         )
         inflacion_pct = st.slider(
             "Inflación anual (%)",
-            min_value=0.0, max_value=15.0, value=4.5, step=0.5,
+            min_value=1.0, max_value=15.0, value=4.5, step=0.5,
             help="Inflación esperada en Colombia"
         )
         tasa_pct = st.slider(
