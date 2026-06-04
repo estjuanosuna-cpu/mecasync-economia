@@ -1359,7 +1359,7 @@ with tab1:
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.markdown("##### 🔵 Sistema actual + mejoras")
+        st.markdown("##### 🔴 Sistema actual + mejoras")
         delta_van = fmt_delta_van(res_actual['ganancia_proyecto'], res_actual_base['ganancia_proyecto'])
         st.metric("Ganancia", f"${res_actual['ganancia_proyecto']/1e6:,.0f}M",
                  delta=delta_van if delta_van else ('✓ Positiva' if res_actual['ganancia_proyecto'] > 0 else '✗ Negativa'),
@@ -1372,7 +1372,7 @@ with tab1:
                  delta=fmt_delta_money(res_actual['utilidad_mensual'], res_actual_base['utilidad_mensual']))
 
     with col2:
-        st.markdown("##### 🟢 Automatización parcial")
+        st.markdown("##### 🟡 Automatización parcial")
         delta_van = fmt_delta_van(res_parcial['ganancia_proyecto'], res_parcial_base['ganancia_proyecto'])
         st.metric("Ganancia", f"${res_parcial['ganancia_proyecto']/1e6:,.0f}M",
                  delta=delta_van if delta_van else ('✓ Positiva' if res_parcial['ganancia_proyecto'] > 0 else '✗ Negativa'),
@@ -1385,7 +1385,7 @@ with tab1:
                  delta=fmt_delta_money(res_parcial['utilidad_mensual'], res_parcial_base['utilidad_mensual']))
 
     with col3:
-        st.markdown("##### 🔴 Automatización total")
+        st.markdown("##### 🟢 Automatización total")
         delta_van = fmt_delta_van(res_total['ganancia_proyecto'], res_total_base['ganancia_proyecto'])
         st.metric("Ganancia", f"${res_total['ganancia_proyecto']/1e6:,.0f}M",
                  delta=delta_van if delta_van else ('✓ Positiva' if res_total['ganancia_proyecto'] > 0 else '✗ Negativa'),
