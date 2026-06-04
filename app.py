@@ -195,14 +195,14 @@ PASOS_TOUR = {
         del simulador: una recomendación generada automáticamente integrando todos los
         indicadores económicos.
 
-        Debajo, los **indicadores financieros por alternativa**: VAN, TIR, Payback,
+        Debajo, los **indicadores financieros por alternativa**: Ganancia, ROI, Payback,
         Utilidad mensual. Estos son los criterios clásicos de evaluación de proyectos
         de inversión.
         """,
         "observar": """
-        - **VAN positivo** (verde) significa que la alternativa genera valor económico
-        - **VAN negativo** (rojo) significa que destruye valor
-        - La **TIR** debe superar la tasa de interés (12%) para que el proyecto sea aceptable
+        - **Ganancia positiva** (verde) significa que la alternativa genera valor económico
+        - **Ganancia negativa** (rojo) significa que destruye valor
+        - El **ROI** debe superar la tasa de interés (12%) para que el proyecto sea mejor que un CDT
         - El **Payback** indica en cuántos años se recupera la inversión
         """,
         "siguiente_tab": "💰 Costos",
@@ -304,7 +304,7 @@ PASOS_TOUR = {
         excelente en el escenario base pero **no resistir un escenario adverso**.
         """,
         "observar": """
-        - En el **escenario pesimista**, todas las alternativas tienen VAN negativo
+        - En el **escenario pesimista**, todas las alternativas tienen Ganancia negativa
         - Por eso el veredicto es "IMPLEMENTAR POR FASES" en lugar de "IMPLEMENTAR"
         - La auto. parcial sigue siendo la **más resiliente** en escenarios adversos
         """,
@@ -314,7 +314,7 @@ PASOS_TOUR = {
         "tab_nombre": "⚖️ Matriz de decisión",
         "titulo": "Decisión multicriterio ponderada",
         "narracion": """
-        El VAN solo no basta para decidir. Aquí integramos **7 criterios ponderados**:
+        La Ganancia sola no basta para decidir. Aquí integramos **7 criterios ponderados**:
         rentabilidad, productividad, eficiencia económica, riesgo, payback,
         flexibilidad operativa y bajo CAPEX.
 
@@ -435,7 +435,6 @@ def calcular_alternativa(params, tipo):
         cv_reproceso = 280_000
         capacidad = params["capacidad_actual"]
         importados_usd = 5_000
-        riesgo = 0.15
     elif tipo == "parcial":
         capex = params["capex_parcial"]
         operarios = params["operarios_parcial"]
@@ -444,7 +443,6 @@ def calcular_alternativa(params, tipo):
         cv_reproceso = 110_000
         capacidad = params["capacidad_parcial"]
         importados_usd = 48_000
-        riesgo = 0.10
     elif tipo == "total":
         capex = params["capex_total"]
         operarios = params["operarios_total"]
@@ -453,7 +451,6 @@ def calcular_alternativa(params, tipo):
         cv_reproceso = 38_000
         capacidad = params["capacidad_total"]
         importados_usd = 145_000
-        riesgo = 0.20
 
     # Producción real (limitada por capacidad)
     Q = min(params["demanda"], capacidad)
@@ -485,21 +482,17 @@ def calcular_alternativa(params, tipo):
     eficiencia_tecnica = Q / capacidad if capacidad > 0 else 0
     eficiencia_economica = utilidad_mensual / CT if CT > 0 else 0
 
-    # VAN
-    tasa = params["tasa_interes"]
-    inflacion = params["inflacion"]
+    # Rentabilidad simple (sin descuento de flujos)
     horizonte = params["horizonte"]
-    VAN = -capex_ajustado
-    for t in range(1, horizonte + 1):
-        flujo_t = utilidad_anual * ((1 + inflacion) ** (t - 1))
-        VAN += flujo_t / ((1 + tasa) ** t)
-
-    # TIR
-    TIR = calcular_TIR(capex_ajustado, utilidad_anual, inflacion, horizonte)
-
-    # Payback y ROI
+    ganancia_proyecto = (utilidad_anual * horizonte) - capex_ajustado
+    margen = utilidad_mensual / IT if IT > 0 else 0
     payback = capex_ajustado / utilidad_anual if utilidad_anual > 0 else float('inf')
     ROI = utilidad_anual / capex_ajustado if capex_ajustado > 0 else 0
+
+    # Costo de oportunidad: cuanto ganarias con ese CAPEX en un CDT
+    tasa = params["tasa_interes"]
+    ganancia_cdt = capex_ajustado * tasa * horizonte
+    ventaja_vs_cdt = ganancia_proyecto - ganancia_cdt
 
     return {
         "tipo": tipo, "Q": Q, "P": P, "CF": CF, "CV": CV, "CT": CT,
@@ -510,205 +503,115 @@ def calcular_alternativa(params, tipo):
         "eficiencia_tecnica": eficiencia_tecnica,
         "eficiencia_economica": eficiencia_economica,
         "capacidad": capacidad, "operarios": operarios,
-        "VAN": VAN, "TIR": TIR, "payback": payback, "ROI": ROI,
-        "riesgo": riesgo,
+        "ganancia_proyecto": ganancia_proyecto, "margen": margen,
+        "payback": payback, "ROI": ROI,
+        "ventaja_vs_cdt": ventaja_vs_cdt,
     }
 
-
-def calcular_TIR(capex, utilidad_anual, inflacion, horizonte, tol=1e-4, max_iter=300):
-    """Búsqueda binaria de la TIR."""
-    if utilidad_anual <= 0 or capex <= 0:
-        return float('nan')
-
-    def van_a_tasa(r):
-        v = -capex
-        for t in range(1, horizonte + 1):
-            v += (utilidad_anual * ((1 + inflacion) ** (t - 1))) / ((1 + r) ** t)
-        return v
-
-    lo, hi = -0.50, 0.10
-    f_lo = van_a_tasa(lo)
-    for _ in range(60):
-        f_hi = van_a_tasa(hi)
-        if f_lo * f_hi < 0:
-            break
-        hi *= 2.0
-        if hi > 1e9:
-            return float('nan')
-
-    if van_a_tasa(lo) * van_a_tasa(hi) > 0:
-        return float('nan')
-
-    for _ in range(max_iter):
-        mid = (lo + hi) / 2
-        f_mid = van_a_tasa(mid)
-        if abs(f_mid) < tol or (hi - lo) < 1e-8:
-            return mid
-        if van_a_tasa(lo) * f_mid < 0:
-            hi = mid
-        else:
-            lo = mid
-            f_lo = f_mid
-    return mid
 
 
 def calcular_escenarios(params_base):
-    """Calcula resultados para los 3 escenarios."""
+    """Calcula resultados para 3 escenarios RELATIVOS a los valores actuales."""
     escenarios_def = {
-        "PESIMISTA": {
-            "demanda_mult": 0.75, "trm": 4_600,
-            "inflacion": 0.075, "tasa_interes": 0.16,
-            "precio_mult": 0.92,
-        },
-        "PROBABLE": {
-            "demanda_mult": 1.0, "trm": params_base["trm"],
-            "inflacion": params_base["inflacion"],
-            "tasa_interes": params_base["tasa_interes"],
-            "precio_mult": 1.0,
-        },
-        "OPTIMISTA": {
-            "demanda_mult": 1.20, "trm": 3_850,
-            "inflacion": 0.030, "tasa_interes": 0.09,
-            "precio_mult": 1.05,
-        },
+        "PESIMISTA": {"demanda_mult": 0.80, "precio_mult": 0.95, "trm_delta": 400, "cf_mult": 1.05, "salario_mult": 1.08},
+        "PROBABLE":  {"demanda_mult": 1.0,  "precio_mult": 1.0,  "trm_delta": 0,   "cf_mult": 1.0,  "salario_mult": 1.0},
+        "OPTIMISTA": {"demanda_mult": 1.20, "precio_mult": 1.05, "trm_delta": -300, "cf_mult": 0.95, "salario_mult": 0.95},
     }
     resultados = {}
-    for esc, mods in escenarios_def.items():
-        p_temp = params_base.copy()
-        p_temp["demanda"] = int(params_base["demanda"] * mods["demanda_mult"])
-        p_temp["precio_venta"] = params_base["precio_venta"] * mods["precio_mult"]
-        p_temp["trm"] = mods["trm"]
-        p_temp["inflacion"] = mods["inflacion"]
-        p_temp["tasa_interes"] = mods["tasa_interes"]
+    for esc, m in escenarios_def.items():
+        p = params_base.copy()
+        p["demanda"] = int(params_base["demanda"] * m["demanda_mult"])
+        p["precio_venta"] = params_base["precio_venta"] * m["precio_mult"]
+        p["trm"] = params_base["trm"] + m["trm_delta"]
+        p["salario_integral"] = params_base["salario_integral"] * m["salario_mult"]
+        p["cf_actual"]  = params_base["cf_actual"]  * m["cf_mult"]
+        p["cf_parcial"] = params_base["cf_parcial"] * m["cf_mult"]
+        p["cf_total"]   = params_base["cf_total"]   * m["cf_mult"]
         resultados[esc] = {
-            "actual":  calcular_alternativa(p_temp, "actual"),
-            "parcial": calcular_alternativa(p_temp, "parcial"),
-            "total":   calcular_alternativa(p_temp, "total"),
+            "actual":  calcular_alternativa(p, "actual"),
+            "parcial": calcular_alternativa(p, "parcial"),
+            "total":   calcular_alternativa(p, "total"),
         }
     return resultados
 
 
 def calcular_matriz_multicriterio(res_actual, res_parcial, res_total):
-    """Calcula la matriz de decisión multicriterio."""
+    """Calcula la matriz con puntajes DINÁMICOS basados en resultados."""
     pesos = {
-        "Rentabilidad (VAN)":     0.25,
+        "Rentabilidad":           0.25,
         "Productividad":          0.15,
         "Eficiencia económica":   0.15,
-        "Riesgo (inverso)":       0.15,
-        "Payback (inverso)":      0.10,
+        "Bajo riesgo":            0.15,
+        "Recuperación rápida":    0.10,
         "Flexibilidad operativa": 0.10,
-        "Bajo CAPEX (inverso)":   0.10,
+        "Bajo CAPEX":             0.10,
     }
-    puntajes = {
-        "Sistema actual": {
-            "Rentabilidad (VAN)":     2, "Productividad":          2,
-            "Eficiencia económica":   3, "Riesgo (inverso)":       4,
-            "Payback (inverso)":      5, "Flexibilidad operativa": 5,
-            "Bajo CAPEX (inverso)":   5,
-        },
-        "Automatización parcial": {
-            "Rentabilidad (VAN)":     5, "Productividad":          4,
-            "Eficiencia económica":   5, "Riesgo (inverso)":       4,
-            "Payback (inverso)":      4, "Flexibilidad operativa": 4,
-            "Bajo CAPEX (inverso)":   3,
-        },
-        "Automatización total": {
-            "Rentabilidad (VAN)":     4, "Productividad":          5,
-            "Eficiencia económica":   3, "Riesgo (inverso)":       2,
-            "Payback (inverso)":      2, "Flexibilidad operativa": 2,
-            "Bajo CAPEX (inverso)":   1,
-        },
-    }
-    totales = {}
-    detalle = {}
+    def rank3(vals, higher_better=True):
+        idx = sorted(range(3), key=lambda i: vals[i], reverse=higher_better)
+        s = [0,0,0]; s[idx[0]]=5; s[idx[1]]=4; s[idx[2]]=2
+        return s
+    R = [res_actual, res_parcial, res_total]
+    sc = [
+        rank3([r["ganancia_proyecto"] for r in R], True),
+        rank3([r["productividad"] for r in R], True),
+        rank3([r["eficiencia_economica"] for r in R], True),
+        rank3([r["capex_ajustado"] for r in R], False),
+        rank3([r["payback"] if r["payback"]!=float("inf") else 9999 for r in R], False),
+        rank3([r["operarios"] for r in R], True),
+        rank3([r["capex_ajustado"] for r in R], False),
+    ]
+    alt_names = ["Sistema actual","Automatización parcial","Automatización total"]
+    crit_names = list(pesos.keys())
+    puntajes = {}
+    for i, alt in enumerate(alt_names):
+        puntajes[alt] = {crit_names[j]: sc[j][i] for j in range(7)}
+    totales = {}; detalle = {}
     for alt, scores in puntajes.items():
-        total = 0
-        detalle[alt] = {}
+        total = 0; detalle[alt] = {}
         for crit, p in scores.items():
-            ponderado = p * pesos[crit]
-            detalle[alt][crit] = (p, pesos[crit], ponderado)
-            total += ponderado
+            pond = p * pesos[crit]; detalle[alt][crit] = (p, pesos[crit], pond); total += pond
         totales[alt] = total
     return pesos, puntajes, totales, detalle
 
 
 def generar_veredicto(res_actual, res_parcial, res_total, escenarios, totales_matriz, tasa):
-    """Genera la recomendación final."""
-    van_parcial = res_parcial["VAN"]
-    van_total = res_total["VAN"]
-    tir_parcial = res_parcial["TIR"]
-    tir_total = res_total["TIR"]
-    van_parcial_pesim = escenarios["PESIMISTA"]["parcial"]["VAN"]
-    van_total_pesim = escenarios["PESIMISTA"]["total"]["VAN"]
-    ganadora = max(totales_matriz, key=totales_matriz.get)
+    """Genera recomendación basada en ganancia, margen, ROI y escenarios."""
+    ganadora_nombre = max(totales_matriz, key=totales_matriz.get)
+    mapa = {"Sistema actual": (res_actual, "actual"),
+            "Automatización parcial": (res_parcial, "parcial"),
+            "Automatización total": (res_total, "total")}
+    res_g, key_g = mapa[ganadora_nombre]
+    gan = res_g["ganancia_proyecto"]
+    margen = res_g["margen"]
+    roi = res_g["ROI"]
+    pb = res_g["payback"]
+    gan_pesim = escenarios["PESIMISTA"][key_g]["ganancia_proyecto"]
+    todas_neg = all(r["ganancia_proyecto"] <= 0 for r in [res_actual, res_parcial, res_total])
 
-    def tir_supera_tasa(tir, van):
-        if isinstance(tir, float) and np.isnan(tir):
-            return van > 0
-        return tir > tasa
-
-    parcial_supera = tir_supera_tasa(tir_parcial, van_parcial)
-    total_supera = tir_supera_tasa(tir_total, van_total)
-
-    if van_parcial <= 0 and van_total <= 0:
-        return {
-            "veredicto": "DESCARTAR automatización",
-            "alternativa": "Mantener sistema actual + mejoras de mantenimiento",
-            "color": "rojo",
-            "justif": ("Ninguna alternativa de automatización genera valor económico positivo "
-                      "en el escenario probable. El costo de capital no se recupera con los "
-                      "flujos esperados.")
-        }
-    elif ganadora == "Automatización parcial" and parcial_supera:
-        if van_parcial_pesim > 0:
-            return {
-                "veredicto": "IMPLEMENTAR",
-                "alternativa": "Automatización parcial (estación de calibración)",
+    if todas_neg:
+        return {"veredicto": "DESCARTAR automatización",
+                "alternativa": "Mantener sistema actual + mejoras",
+                "color": "rojo",
+                "justif": "Ninguna alternativa genera ganancia positiva en las condiciones actuales. La inversión no se recupera."}
+    if gan > 0 and gan_pesim > 0 and margen > 0.02 and roi > tasa:
+        return {"veredicto": "IMPLEMENTAR",
+                "alternativa": f"{ganadora_nombre}",
                 "color": "verde",
-                "justif": ("La automatización parcial presenta el mayor VAN entre alternativas, "
-                          "TIR superior al costo de capital, y mantiene viabilidad incluso en "
-                          "el escenario pesimista.")
-            }
-        else:
-            return {
-                "veredicto": "IMPLEMENTAR POR FASES",
-                "alternativa": "Automatización parcial (estación de calibración) — por fases",
+                "justif": f"{ganadora_nombre} genera ganancia de ${gan/1e6:,.0f}M, ROI del {roi:.0%} (supera tasa del {tasa:.0%}), margen del {margen:.1%}, y resiste el escenario pesimista (${gan_pesim/1e6:,.0f}M). Recuperación en {pb:.1f} años."}
+    if gan > 0 and roi > tasa:
+        return {"veredicto": "IMPLEMENTAR POR FASES",
+                "alternativa": f"{ganadora_nombre} — por fases",
                 "color": "amarillo",
-                "justif": ("La automatización parcial es rentable en escenario base, pero en "
-                          "el pesimista presenta VAN negativo. Se recomienda implementar por "
-                          "fases: iniciar con calibración automática y escalar según resultados "
-                          "reales del primer año.")
-            }
-    elif ganadora == "Automatización total" and total_supera and van_total > van_parcial:
-        if van_total_pesim > 0:
-            return {
-                "veredicto": "IMPLEMENTAR",
-                "alternativa": "Automatización total",
-                "color": "verde",
-                "justif": "Automatización total con mejor desempeño global y resistencia al riesgo."
-            }
-        else:
-            return {
-                "veredicto": "IMPLEMENTAR POR FASES",
-                "alternativa": "Automatización total — implementación gradual",
+                "justif": f"{ganadora_nombre} es rentable (ganancia ${gan/1e6:,.0f}M, ROI {roi:.0%}), pero en pesimista la ganancia sería ${gan_pesim/1e6:,.0f}M. Implementar gradualmente."}
+    if gan > 0:
+        return {"veredicto": "ESPERAR",
+                "alternativa": "Postergar 12-18 meses",
                 "color": "amarillo",
-                "justif": "Automatización total atractiva pero requiere despliegue gradual por riesgo."
-            }
-    elif van_parcial > 0 and not parcial_supera:
-        return {
-            "veredicto": "ESPERAR",
-            "alternativa": "Postergar la decisión 12-18 meses",
+                "justif": f"Ganancia positiva pero marginal (${gan/1e6:,.0f}M). ROI ({roi:.0%}) cercano a la tasa alternativa ({tasa:.0%}). Esperar mejores condiciones."}
+    return {"veredicto": "REDISEÑAR el alcance",
+            "alternativa": "Replantear el proyecto",
             "color": "amarillo",
-            "justif": ("VAN positivo pero TIR no supera holgadamente la tasa de descuento. "
-                      "La rentabilidad ajustada por riesgo es marginal.")
-        }
-    else:
-        return {
-            "veredicto": "REDISEÑAR el alcance",
-            "alternativa": "Replantear estaciones a automatizar",
-            "color": "amarillo",
-            "justif": "Los indicadores no son concluyentes; se requiere reformular."
-        }
+            "justif": "Indicadores no concluyentes; reformular alcance."}
 
 
 # ==============================================================================
@@ -757,7 +660,7 @@ with st.sidebar:
         tasa_pct = st.slider(
             "Tasa de interés / costo de capital (%)",
             min_value=5.0, max_value=25.0, value=12.0, step=0.5,
-            help="Tasa para descontar flujos futuros en el VAN"
+            help="Tasa para descontar flujos futuros en la Ganancia"
         )
 
     # === MANO DE OBRA ===
@@ -1008,7 +911,7 @@ with tab_guia:
 
         **Qué observar:**
         - El **CAPEX ajustado** de la auto. total sube (tab 🌎 Macro)
-        - El **VAN de la auto. total** se vuelve aún más negativo
+        - El **Ganancia de la auto. total** se vuelve aún más negativo
         - El veredicto sigue siendo "IMPLEMENTAR POR FASES" pero ahora con margen menor
 
         **Interpretación económica:**
@@ -1025,7 +928,7 @@ with tab_guia:
         2. Bajar el slider **Demanda esperada** de `520` a `300` uds/mes
 
         **Qué observar:**
-        - **Todos los VAN se vuelven negativos** (ver tab 📊 Dashboard)
+        - **Todas las Ganancias se vuelven negativos** (ver tab 📊 Dashboard)
         - El **veredicto cambia a "DESCARTAR"** (color rojo)
         - El simulador recomienda no automatizar y mantener el sistema actual
 
@@ -1043,8 +946,8 @@ with tab_guia:
         2. Subir **Tasa de interés** de `12%` a `20%`
 
         **Qué observar:**
-        - El **VAN de la auto. parcial** cae significativamente
-        - El **VAN del sistema actual** también baja (los flujos futuros valen menos hoy)
+        - El **Ganancia de la auto. parcial** cae significativamente
+        - El **Ganancia del sistema actual** también baja (los flujos futuros valen menos hoy)
         - Posible cambio de veredicto a "ESPERAR"
 
         **Interpretación económica:**
@@ -1063,7 +966,7 @@ with tab_guia:
 
         **Qué observar:**
         - El **veredicto puede cambiar a "IMPLEMENTAR"** (verde)
-        - Los **VAN de auto. parcial y total** suben fuerte
+        - Los **Ganancia de auto. parcial y total** suben fuerte
         - La auto. total empieza a competir con la parcial
 
         **Interpretación económica:**
@@ -1102,7 +1005,7 @@ with tab_guia:
 
         **Qué observar:**
         - **Margen unitario aumenta** en todas las alternativas
-        - **VAN de la auto. parcial** crece significativamente
+        - **Ganancia de la auto. parcial** crece significativamente
         - **Punto de equilibrio baja** (necesitas menos unidades para no perder)
 
         **Interpretación económica:**
@@ -1138,7 +1041,7 @@ with tab_guia:
         2. Subir **Automatización total** de `1000` a `1300` M COP
 
         **Qué observar:**
-        - **VAN de auto. total** cae aún más en territorio negativo
+        - **Ganancia de auto. total** cae aún más en territorio negativo
         - **Payback de auto. total** empeora
         - El **gap entre auto. parcial y total** se amplía a favor de la parcial
 
@@ -1158,7 +1061,7 @@ with tab_guia:
         **Qué observar:**
         - **Margen unitario se reduce** en todas las alternativas
         - **Punto de equilibrio sube** drásticamente
-        - **VAN** de todas las opciones se deteriora
+        - **Ganancia** de todas las opciones se deteriora
         - El sistema actual con CMe alto puede entrar en pérdidas
 
         **Interpretación económica:**
@@ -1193,7 +1096,7 @@ with tab_guia:
         2. Bajar **Operarios actual** de `12` a `10`
 
         **Qué observar:**
-        - **VAN del sistema actual** mejora
+        - **Ganancia del sistema actual** mejora
         - El gap con auto. parcial se reduce ligeramente
         - Demuestra que **siempre hay oportunidades de mejora sin grandes inversiones**
 
@@ -1213,12 +1116,12 @@ with tab_guia:
         4. Bajar **CF total** de `345` a `295` M COP
 
         **Qué observar:**
-        - **Todos los VAN mejoran** simultáneamente
+        - **Todas las Ganancias mejoran** simultáneamente
         - **Auto. total** se beneficia más en términos absolutos (tiene los CF más altos)
         - El **punto de equilibrio baja** para todas las alternativas
 
         **Interpretación económica:**
-        Los costos fijos son particularmente importantes porque se pagan independientemente de las ventas. Una reducción estructural en CF tiene efecto perpetuo y palanca operativa: cada peso ahorrado se multiplica por el horizonte de análisis al calcular el VAN.
+        Los costos fijos son particularmente importantes porque se pagan independientemente de las ventas. Una reducción estructural en CF tiene efecto perpetuo y palanca operativa: cada peso ahorrado se multiplica por el horizonte de análisis al calcular la Ganancia.
         """)
 
     # Demo 13 - SOBRECOSTOS DE MANTENIMIENTO
@@ -1231,7 +1134,7 @@ with tab_guia:
         2. Subir **CF total** de `345` a `420` M COP
 
         **Qué observar:**
-        - **VAN de auto. total** cae aún más
+        - **Ganancia de auto. total** cae aún más
         - Refuerza que la decisión de descartar auto. total es correcta
         - La auto. parcial se consolida como ganadora
 
@@ -1251,8 +1154,8 @@ with tab_guia:
         2. Subir **Horizonte de análisis** de `5` a `10` años
 
         **Qué observar:**
-        - **VAN de TODAS las alternativas sube** (más años de flujos positivos)
-        - **Auto. total puede acercarse a VAN positivo**
+        - **Ganancia de TODAS las alternativas sube** (más años de flujos positivos)
+        - **Auto. total puede acercarse a Ganancia positiva**
         - La inversión inicial se diluye entre más años de retorno
 
         **Interpretación económica:**
@@ -1271,8 +1174,8 @@ with tab_guia:
         4. **🏭 Mercado:** bajar **Demanda** a `480` (por elasticidad del precio mayor)
 
         **Qué observar:**
-        - Múltiples efectos combinados sobre el VAN
-        - La auto. parcial mejora sustancialmente su VAN
+        - Múltiples efectos combinados sobre la Ganancia
+        - La auto. parcial mejora sustancialmente su Ganancia
         - Demuestra la utilidad de simular **escenarios estratégicos integrales**
 
         **Interpretación económica:**
@@ -1288,10 +1191,10 @@ with tab_guia:
     """)
 
     veredictos_info = [
-        ("✅ IMPLEMENTAR", "verde", "VAN > 0 en escenario base Y resiste el escenario pesimista. Decisión clara: invertir."),
-        ("⚠️ IMPLEMENTAR POR FASES", "amarillo", "VAN > 0 en base pero NO resiste el pesimista. Mejor avanzar por etapas para mitigar riesgo."),
-        ("🟡 ESPERAR", "amarillo", "VAN positivo pero rentabilidad ajustada por riesgo es marginal. Postergar 12-18 meses."),
-        ("🔴 DESCARTAR", "rojo", "Todas las alternativas tienen VAN ≤ 0. Mantener sistema actual + mejoras."),
+        ("✅ IMPLEMENTAR", "verde", "Ganancia positiva, buen margen, ROI superior a la tasa y resiste el pesimista."),
+        ("⚠️ IMPLEMENTAR POR FASES", "amarillo", "Ganancia positiva con ROI atractivo, pero no resiste el pesimista. Avanzar por etapas."),
+        ("🟡 ESPERAR", "amarillo", "Ganancia positiva pero marginal. ROI cercano a la tasa alternativa. Postergar."),
+        ("🔴 DESCARTAR", "rojo", "Ninguna alternativa genera ganancia positiva. Mantener sistema actual."),
         ("🟠 REDISEÑAR", "amarillo", "Indicadores no concluyentes; revisar el alcance del proyecto."),
     ]
 
@@ -1311,12 +1214,12 @@ with tab_guia:
     **Es comportamiento correcto del simulador**, no un error.
 
     El veredicto solo cambia cuando los indicadores **cruzan ciertos umbrales**:
-    - VAN pasa de positivo a negativo (o viceversa)
-    - TIR supera o no la tasa de interés
+    - Ganancia pasa de positiva a negativa (o viceversa)
+    - ROI supera o no la tasa de interés
     - El escenario pesimista deja de ser viable
 
     **Pero los NÚMEROS sí están cambiando todo el tiempo.** Por ejemplo, si subes inflación
-    del 4.5% al 6%, verás en el Dashboard que el VAN cambia (los flujos futuros valen más
+    del 4.5% al 6%, verás en el Dashboard que la Ganancia cambia (los resultados del proyecto se ven afectados
     en pesos nominales, pero también se descuentan más fuerte). El veredicto puede mantenerse
     en "IMPLEMENTAR POR FASES" porque las condiciones siguen dentro del mismo rango lógico.
 
@@ -1329,7 +1232,7 @@ with tab_guia:
     st.subheader("📑 Qué hay en cada tab")
 
     tabs_info = [
-        ("📊 Dashboard", "Veredicto principal + métricas clave (VAN, TIR, Payback, ROI) por alternativa, con comparación a valores base."),
+        ("📊 Dashboard", "Veredicto principal + métricas clave (Ganancia, ROI, Payback, ROI) por alternativa, con comparación a valores base."),
         ("💰 Costos", "Análisis detallado de costos fijos, variables, costo medio y costo marginal. Incluye gráficas de CT vs IT y curvas de CMe."),
         ("📈 Mercado", "Curvas de oferta y demanda, cálculo de elasticidad-precio, interpretación económica."),
         ("⚙️ Productividad", "El trade-off central del proyecto: eficiencia técnica vs eficiencia económica."),
@@ -1391,7 +1294,7 @@ with tab1:
         st.caption("📌 El **delta (Δ)** muestra el cambio vs el escenario base original")
 
     def fmt_delta_van(actual_van, base_van):
-        """Formatea el delta del VAN respecto al base."""
+        """Formatea el delta dla Ganancia respecto al base."""
         if not variables_modificadas:
             return None
         diff = (actual_van - base_van) / 1e6
@@ -1424,13 +1327,12 @@ with tab1:
 
     with col1:
         st.markdown("##### 🔵 Sistema actual + mejoras")
-        delta_van = fmt_delta_van(res_actual['VAN'], res_actual_base['VAN'])
-        st.metric("VAN", f"${res_actual['VAN']/1e6:,.0f}M",
-                 delta=delta_van if delta_van else ('✓ Positivo' if res_actual['VAN'] > 0 else '✗ Negativo'),
-                 delta_color="normal" if delta_van else ("normal" if res_actual['VAN'] > 0 else "inverse"))
-        tir_str = ">100%" if np.isnan(res_actual['TIR']) else f"{res_actual['TIR']:.1%}"
-        delta_tir = None if (np.isnan(res_actual['TIR']) or np.isnan(res_actual_base['TIR'])) else fmt_delta_pct(res_actual['TIR'], res_actual_base['TIR'])
-        st.metric("TIR", tir_str, delta=delta_tir)
+        delta_van = fmt_delta_van(res_actual['ganancia_proyecto'], res_actual_base['ganancia_proyecto'])
+        st.metric("Ganancia", f"${res_actual['ganancia_proyecto']/1e6:,.0f}M",
+                 delta=delta_van if delta_van else ('✓ Positiva' if res_actual['ganancia_proyecto'] > 0 else '✗ Negativa'),
+                 delta_color="normal" if delta_van else ("normal" if res_actual['ganancia_proyecto'] > 0 else "inverse"))
+        st.metric("ROI anual", f"{res_actual['ROI']:.0%}",
+                 delta=fmt_delta_pct(res_actual['ROI'], res_actual_base['ROI']))
         payback_str = "∞" if res_actual['payback'] == float('inf') else f"{res_actual['payback']:.2f} años"
         st.metric("Payback", payback_str)
         st.metric("Utilidad mensual", f"${res_actual['utilidad_mensual']/1e6:,.1f}M",
@@ -1438,13 +1340,12 @@ with tab1:
 
     with col2:
         st.markdown("##### 🟢 Automatización parcial")
-        delta_van = fmt_delta_van(res_parcial['VAN'], res_parcial_base['VAN'])
-        st.metric("VAN", f"${res_parcial['VAN']/1e6:,.0f}M",
-                 delta=delta_van if delta_van else ('✓ Positivo' if res_parcial['VAN'] > 0 else '✗ Negativo'),
-                 delta_color="normal" if delta_van else ("normal" if res_parcial['VAN'] > 0 else "inverse"))
-        tir_str = ">100%" if np.isnan(res_parcial['TIR']) else f"{res_parcial['TIR']:.1%}"
-        delta_tir = None if (np.isnan(res_parcial['TIR']) or np.isnan(res_parcial_base['TIR'])) else fmt_delta_pct(res_parcial['TIR'], res_parcial_base['TIR'])
-        st.metric("TIR", tir_str, delta=delta_tir)
+        delta_van = fmt_delta_van(res_parcial['ganancia_proyecto'], res_parcial_base['ganancia_proyecto'])
+        st.metric("Ganancia", f"${res_parcial['ganancia_proyecto']/1e6:,.0f}M",
+                 delta=delta_van if delta_van else ('✓ Positiva' if res_parcial['ganancia_proyecto'] > 0 else '✗ Negativa'),
+                 delta_color="normal" if delta_van else ("normal" if res_parcial['ganancia_proyecto'] > 0 else "inverse"))
+        st.metric("ROI anual", f"{res_parcial['ROI']:.0%}",
+                 delta=fmt_delta_pct(res_parcial['ROI'], res_parcial_base['ROI']))
         payback_str = "∞" if res_parcial['payback'] == float('inf') else f"{res_parcial['payback']:.2f} años"
         st.metric("Payback", payback_str)
         st.metric("Utilidad mensual", f"${res_parcial['utilidad_mensual']/1e6:,.1f}M",
@@ -1452,13 +1353,12 @@ with tab1:
 
     with col3:
         st.markdown("##### 🔴 Automatización total")
-        delta_van = fmt_delta_van(res_total['VAN'], res_total_base['VAN'])
-        st.metric("VAN", f"${res_total['VAN']/1e6:,.0f}M",
-                 delta=delta_van if delta_van else ('✓ Positivo' if res_total['VAN'] > 0 else '✗ Negativo'),
-                 delta_color="normal" if delta_van else ("normal" if res_total['VAN'] > 0 else "inverse"))
-        tir_str = ">100%" if np.isnan(res_total['TIR']) else f"{res_total['TIR']:.1%}"
-        delta_tir = None if (np.isnan(res_total['TIR']) or np.isnan(res_total_base['TIR'])) else fmt_delta_pct(res_total['TIR'], res_total_base['TIR'])
-        st.metric("TIR", tir_str, delta=delta_tir)
+        delta_van = fmt_delta_van(res_total['ganancia_proyecto'], res_total_base['ganancia_proyecto'])
+        st.metric("Ganancia", f"${res_total['ganancia_proyecto']/1e6:,.0f}M",
+                 delta=delta_van if delta_van else ('✓ Positiva' if res_total['ganancia_proyecto'] > 0 else '✗ Negativa'),
+                 delta_color="normal" if delta_van else ("normal" if res_total['ganancia_proyecto'] > 0 else "inverse"))
+        st.metric("ROI anual", f"{res_total['ROI']:.0%}",
+                 delta=fmt_delta_pct(res_total['ROI'], res_total_base['ROI']))
         payback_str = "∞" if res_total['payback'] == float('inf') else f"{res_total['payback']:.2f} años"
         st.metric("Payback", payback_str)
         st.metric("Utilidad mensual", f"${res_total['utilidad_mensual']/1e6:,.1f}M",
@@ -1467,11 +1367,11 @@ with tab1:
     st.markdown("---")
 
     # === GRÁFICA COMPARATIVA VAN ===
-    st.subheader("Comparación visual del VAN")
+    st.subheader("Comparación de la Ganancia del proyecto")
 
     fig = go.Figure()
     nombres = ["Sistema actual", "Auto. parcial", "Auto. total"]
-    vans = [res_actual["VAN"]/1e6, res_parcial["VAN"]/1e6, res_total["VAN"]/1e6]
+    vans = [res_actual["ganancia_proyecto"]/1e6, res_parcial["ganancia_proyecto"]/1e6, res_total["ganancia_proyecto"]/1e6]
     colores = [COL_ACTUAL, COL_PARCIAL, COL_TOTAL]
 
     fig.add_trace(go.Bar(
@@ -1481,7 +1381,7 @@ with tab1:
     ))
     fig.add_hline(y=0, line_color="black", line_width=1)
     fig.update_layout(
-        yaxis_title="VAN (millones COP)",
+        yaxis_title="Ganancia (millones COP)",
         height=400, showlegend=False,
         plot_bgcolor="white",
     )
@@ -1875,11 +1775,11 @@ with tab5:
 
     macro_items = [
         ("💵 INFLACIÓN", "Eleva el costo de mano de obra y materiales año a año. Los flujos de caja futuros se ajustan por inflación."),
-        ("🏦 TASA DE INTERÉS", "Es el costo de capital usado para descontar flujos futuros (cálculo del VAN). Una tasa más alta penaliza alternativas con CAPEX elevado."),
+        ("🏦 TASA DE INTERÉS", "Es el costo de capital usado para descontar flujos futuros (cálculo dla Ganancia). Una tasa más alta penaliza alternativas con CAPEX elevado."),
         ("💱 TIPO DE CAMBIO (TRM)", "Sensores, PLC y robots son importados. Si la TRM sube, el CAPEX real aumenta para alternativas con mayor componente importado."),
         ("🏛️ POLÍTICA MONETARIA", "Determina la tasa de interés. El Banco de la República puede subir tasas si la inflación se desvía de la meta (3%)."),
         ("📊 POLÍTICA FISCAL", "Beneficios tributarios por inversión en innovación (Ley 1715 o equivalentes) podrían reducir el CAPEX efectivo."),
-        ("📉 CICLOS ECONÓMICOS", "En recesión, la demanda industrial cae. Esto afecta la producción esperada y por ende el VAN."),
+        ("📉 CICLOS ECONÓMICOS", "En recesión, la demanda industrial cae. Esto afecta la producción esperada y por ende la Ganancia."),
         ("🌐 COMERCIO INTERNACIONAL", "Aranceles e impuestos a importación de bienes de capital impactan el CAPEX de las alternativas más tecnificadas."),
     ]
 
@@ -1905,36 +1805,36 @@ with tab6:
 
     st.markdown("""
     Para evaluar el **riesgo económico**, simulamos tres escenarios:
-    - **🔴 Pesimista:** demanda -25%, TRM 4.600, inflación 7.5%, tasa 16%, precio -8%
+    - **🔴 Pesimista:** demanda -20%, precio -5%, TRM +$400, CF +5%, salarios +8%
     - **⚪ Probable:** valores base del modelo (los que están en el panel izquierdo)
-    - **🟢 Optimista:** demanda +20%, TRM 3.850, inflación 3%, tasa 9%, precio +5%
+    - **🟢 Optimista:** demanda +20%, precio +5%, TRM -$300, CF -5%, salarios -5%
     """)
 
     # Tabla VAN por escenario
-    st.subheader("VAN por escenario y alternativa")
+    st.subheader("Ganancia por escenario y alternativa")
 
     df_esc = pd.DataFrame({
         "Escenario": ["🔴 PESIMISTA", "⚪ PROBABLE", "🟢 OPTIMISTA"],
         "Sistema actual": [
-            f"${escenarios['PESIMISTA']['actual']['VAN']/1e6:,.0f}M",
-            f"${escenarios['PROBABLE']['actual']['VAN']/1e6:,.0f}M",
-            f"${escenarios['OPTIMISTA']['actual']['VAN']/1e6:,.0f}M",
+            f"${escenarios['PESIMISTA']['actual']['ganancia_proyecto']/1e6:,.0f}M",
+            f"${escenarios['PROBABLE']['actual']['ganancia_proyecto']/1e6:,.0f}M",
+            f"${escenarios['OPTIMISTA']['actual']['ganancia_proyecto']/1e6:,.0f}M",
         ],
         "Auto. parcial": [
-            f"${escenarios['PESIMISTA']['parcial']['VAN']/1e6:,.0f}M",
-            f"${escenarios['PROBABLE']['parcial']['VAN']/1e6:,.0f}M",
-            f"${escenarios['OPTIMISTA']['parcial']['VAN']/1e6:,.0f}M",
+            f"${escenarios['PESIMISTA']['parcial']['ganancia_proyecto']/1e6:,.0f}M",
+            f"${escenarios['PROBABLE']['parcial']['ganancia_proyecto']/1e6:,.0f}M",
+            f"${escenarios['OPTIMISTA']['parcial']['ganancia_proyecto']/1e6:,.0f}M",
         ],
         "Auto. total": [
-            f"${escenarios['PESIMISTA']['total']['VAN']/1e6:,.0f}M",
-            f"${escenarios['PROBABLE']['total']['VAN']/1e6:,.0f}M",
-            f"${escenarios['OPTIMISTA']['total']['VAN']/1e6:,.0f}M",
+            f"${escenarios['PESIMISTA']['total']['ganancia_proyecto']/1e6:,.0f}M",
+            f"${escenarios['PROBABLE']['total']['ganancia_proyecto']/1e6:,.0f}M",
+            f"${escenarios['OPTIMISTA']['total']['ganancia_proyecto']/1e6:,.0f}M",
         ],
     })
     st.dataframe(df_esc, use_container_width=True, hide_index=True)
 
     # Gráfica
-    st.subheader("Visualización del VAN por escenario")
+    st.subheader("Visualización de la Ganancia por escenario")
 
     escs = ["PESIMISTA", "PROBABLE", "OPTIMISTA"]
     fig = go.Figure()
@@ -1944,7 +1844,7 @@ with tab6:
         ("parcial", "Auto. parcial", COL_PARCIAL),
         ("total", "Auto. total", COL_TOTAL),
     ]:
-        vals = [escenarios[e][alt_key]["VAN"]/1e6 for e in escs]
+        vals = [escenarios[e][alt_key]["ganancia_proyecto"]/1e6 for e in escs]
         fig.add_trace(go.Bar(
             x=escs, y=vals, name=alt_nombre, marker_color=color,
             text=[f"${v:,.0f}M" for v in vals], textposition="outside",
@@ -1952,7 +1852,7 @@ with tab6:
 
     fig.add_hline(y=0, line_color="black", line_width=1)
     fig.update_layout(
-        yaxis_title="VAN (millones COP)",
+        yaxis_title="Ganancia (millones COP)",
         barmode="group", height=500, plot_bgcolor="white",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
@@ -2074,10 +1974,10 @@ with tab8:
         ("12. Eficiencia técnica", "Q real / capacidad instalada. Mide qué tan bien se usa la capacidad. Sistema actual: 94.5%."),
         ("13. Eficiencia económica", "Utilidad / costo total. Mide rentabilidad por peso invertido. **Aquí está el trade-off clave del proyecto**."),
         ("14. Inflación", "Aumento sostenido de precios. En el simulador, los flujos futuros se ajustan por 4.5% anual."),
-        ("15. Tasa de interés", "Costo de oportunidad del capital. Se usa para descontar flujos futuros en el VAN (12% E.A.)."),
+        ("15. Tasa de interés", "Costo de oportunidad del capital. Es la rentabilidad alternativa: lo que ganarías en un CDT (12% E.A.). Se compara contra el ROI del proyecto."),
         ("16. Tipo de cambio (TRM)", "Precio del dólar en pesos. Afecta el CAPEX de equipos importados (sensores, PLC, robots)."),
         ("17. Punto de equilibrio", "Q donde IT = CT (no hay ni pérdida ni ganancia). Q_eq = CF/(P-CVu)."),
-        ("18. Rentabilidad (VAN, TIR, ROI, Payback)", "Conjunto de indicadores que miden el valor económico generado por la inversión."),
+        ("18. Rentabilidad (Ganancia, ROI, Payback)", "Conjunto de indicadores que miden el valor económico generado por la inversión."),
         ("19. Riesgo económico", "Probabilidad de obtener resultados diferentes a los esperados. Se analiza con los 3 escenarios."),
     ]
 
